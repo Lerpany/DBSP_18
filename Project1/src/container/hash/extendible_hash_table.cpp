@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <functional>
@@ -28,8 +29,8 @@ ExtendibleHashTable<K, V>::ExtendibleHashTable(size_t bucket_size) : bucket_size
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::IndexOf(const K &key) -> size_t {
-  int mask = (1 << global_depth_) - 1;  // 创建一个根据全局深度定位的掩码
-  return std::hash<K>()(key) & mask;    // 应用掩码到键的哈希值
+  size_t mask = (size_t{1} << global_depth_) - 1;  // 创建一个根据全局深度定位的掩码
+  return std::hash<K>()(key) & mask;               // 应用掩码到键的哈希值
 }
 
 template <typename K, typename V>
@@ -90,6 +91,14 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
   // 加锁，保证线程安全
   std::scoped_lock<std::mutex> lock(latch_);
 
+  auto target_bucket = dir_[IndexOf(key)];
+  for (auto &item : target_bucket->GetItems()) {
+    if (item.first == key) {
+      item.second = value;
+      return;
+    }
+  }
+
   // 检查目标桶是否满，如果满则进行分裂处理
   while (dir_[IndexOf(key)]->IsFull()) {
     size_t index = IndexOf(key);
@@ -131,14 +140,7 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
   }
 
   // 插入或更新键值对
-  auto target_bucket = dir_[IndexOf(key)];
-  for (auto &item : target_bucket->GetItems()) {
-    if (item.first == key) {
-      item.second = value;
-      return;
-    }
-  }
-
+  target_bucket = dir_[IndexOf(key)];
   target_bucket->Insert(key, value);
 }
 
@@ -175,6 +177,13 @@ auto ExtendibleHashTable<K, V>::Bucket::Remove(const K &key) -> bool {
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::Bucket::Insert(const K &key, const V &value) -> bool {
+  for (auto &item : list_) {
+    if (item.first == key) {
+      item.second = value;
+      return true;
+    }
+  }
+
   if (IsFull()) {
     return false;  // 如果桶已满，返回 false
   }
